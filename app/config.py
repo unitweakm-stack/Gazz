@@ -11,8 +11,8 @@ class Settings:
     По требованию проекта значения хранятся прямо в коде.
     """
 
-    BOT_TOKEN: str = "PASTE_YOUR_BOT_TOKEN_HERE"
-    CHANNEL_ID: int = -1001234567890
+    BOT_TOKEN: str = "8633905741:AAF35O30uuXGzPGnpf9kWHBDbfQd0VG2gBg"
+    CHANNEL_ID: int = -1002199433054
     DEFAULT_THUMBNAIL_PATH: Path = Path("assets/default.jpg")
     DEFAULT_UNKNOWN_ARTIST: str = "UNKNOWN_ARTIST"
 
