@@ -1,0 +1,40 @@
+# --- Python Kesh va Kompilyatsiya ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# --- Virtual Muhit (Virtual Environments) ---
+# Loyiha kutubxonalari serverga yuklanmasligi kerak
+.venv/
+venv/
+env/
+ENV/
+build/
+dist/
+
+# --- Maxfiy Ma'lumotlar ---
+# Tokenlar va parollar saqlanadigan fayllar
+.env
+*.session
+*.session-journal
+
+# --- Audio va Media Fayllar ---
+# Bot yuklab olgan yoki foydalanadigan fayllar
+*.mp3
+*.flac
+*.m4a
+*.wav
+*.ogg
+
+# --- Vaqtinchalik Fayllar va Loglar ---
+/tmp/
+*.log
+*.tmp
+
+# --- IDE va Tizim Fayllari ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
