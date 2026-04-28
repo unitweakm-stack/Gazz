@@ -6,28 +6,35 @@ from aiogram.filters import Command
 from aiogram.utils.media_group import MediaGroupBuilder
 from aiogram.types import Update
 
-# Konfiguratsiya
-TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID")
+# ============================================
+# SIZNING TOKEN VA CHANNEL ID
+# ============================================
+BOT_TOKEN = "8799250450:AAHEZxCDTyECh840JFZ29LyGcRU5nwEB624"
+CHANNEL_ID = "-1002199433054"  # String holatda
 
-if not TOKEN or not CHANNEL_ID:
-    raise ValueError("BOT_TOKEN va CHANNEL_ID environment variables sozlanmagan!")
+# Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Bot va app sozlamalari
-bot = Bot(token=TOKEN)
+# Botni ishga tushirish
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 app = FastAPI()
 
-# Kanal ma'lumotlari
 channel_info = None
 
 async def get_channel_data():
     global channel_info
     if channel_info is None:
-        channel_info = await bot.get_chat(CHANNEL_ID)
+        try:
+            channel_info = await bot.get_chat(CHANNEL_ID)
+            logger.info(f"Kanalga ulandi: {channel_info.title}")
+        except Exception as e:
+            logger.error(f"Kanal xatosi: {e}")
+            channel_info = None
     return channel_info
 
-# Handlerlar
+# ============ BUYRUQLAR ============
 @dp.message(Command("start"))
 async def start_command(message: types.Message):
     await message.answer(
@@ -35,7 +42,8 @@ async def start_command(message: types.Message):
         "Botdan foydalanish:\n"
         "1. Musiqa (MP3) yuboring\n"
         "2. Rasm yuboring\n\n"
-        "⚠️ **MUHIM:** Musiqa va rasmni **BIRGALIKDA** (bitta xabarda) yuboring!",
+        "⚠️ **MUHIM:** Musiqa va rasmni **BIRGALIKDA** (bitta xabarda) yuboring!\n\n"
+        "✅ /info - kanal ma'lumoti",
         parse_mode="Markdown"
     )
 
@@ -43,10 +51,14 @@ async def start_command(message: types.Message):
 async def info_command(message: types.Message):
     try:
         channel = await get_channel_data()
-        text = (f"📢 **Kanal ma'lumotlari:**\n"
-                f"📛 **Nomi:** {channel.title}\n"
-                f"🆔 **ID:** {channel.id}")
-        await message.answer(text, parse_mode="Markdown")
+        if channel:
+            text = (f"📢 **Kanal ma'lumotlari:**\n"
+                    f"📛 **Nomi:** {channel.title}\n"
+                    f"🆔 **ID:** {channel.id}\n"
+                    f"👥 **A'zolar:** {channel.members_count if hasattr(channel, 'members_count') else 'Noma'lum'}")
+            await message.answer(text, parse_mode="Markdown")
+        else:
+            await message.answer("❌ Kanal topilmadi! Bot kanalda adminmi?")
     except Exception as e:
         await message.answer(f"❌ Xatolik: {str(e)}")
 
@@ -54,6 +66,10 @@ async def info_command(message: types.Message):
 async def handle_audio_with_photo(message: types.Message):
     try:
         channel = await get_channel_data()
+        if not channel:
+            await message.reply("❌ Kanal topilmadi!")
+            return
+            
         album_builder = MediaGroupBuilder()
         
         audio = message.audio
@@ -68,8 +84,8 @@ async def handle_audio_with_photo(message: types.Message):
             f"💾 Hajmi: {audio.file_size / (1024*1024):.2f} MB"
         )
         
-        # Rasm qo'shish
-        photo = message.photo[-1]  # Eng sifatli rasm
+        # Rasm qo'shish (eng sifatli)
+        photo = message.photo[-1]
         album_builder.add_photo(
             media=photo.file_id,
             caption=caption,
@@ -97,14 +113,16 @@ async def handle_audio_with_photo(message: types.Message):
         )
         
     except Exception as e:
-        logging.error(f"Xatolik: {e}")
+        logger.error(f"Xatolik: {e}")
         await message.reply(f"❌ Xatolik: {str(e)}")
 
 @dp.message(F.audio)
 async def handle_audio_only(message: types.Message):
+    audio = message.audio
     await message.reply(
-        "⚠️ **Faqat musiqa!**\n\n"
-        "Iltimos, musiqa bilan birga **rasm** ham yuboring.",
+        f"⚠️ **Faqat musiqa!**\n\n"
+        f"Musiqa: {audio.title or 'Noma'lum'} - {audio.performer or 'Noma'lum'}\n\n"
+        f"Iltimos, musiqa bilan birga **rasm** ham yuboring.",
         parse_mode="Markdown"
     )
 
@@ -112,7 +130,7 @@ async def handle_audio_only(message: types.Message):
 async def handle_photo_only(message: types.Message):
     await message.reply(
         "⚠️ **Faqat rasm!**\n\n"
-        "Iltimos, rasm bilan birga **musiqa** ham yuboring.",
+        "Iltimos, rasm bilan birga **musiqa (MP3)** ham yuboring.",
         parse_mode="Markdown"
     )
 
@@ -126,49 +144,64 @@ async def handle_other(message: types.Message):
         parse_mode="Markdown"
     )
 
-# Webhook endpoint
+# ============ WEBHOOK ============
 @app.post("/webhook")
 async def webhook(request: Request):
-    """Telegram webhook endpoint"""
     try:
         update_data = await request.json()
         update = Update.model_validate(update_data, context={"bot": bot})
         await dp.feed_update(bot, update)
         return {"status": "ok"}
     except Exception as e:
-        logging.error(f"Webhook error: {e}")
+        logger.error(f"Webhook xato: {e}")
         return {"status": "error", "message": str(e)}
 
 @app.get("/")
 async def root():
-    """Health check endpoint"""
     return {
         "status": "active",
-        "bot": "Telegram Music Bot",
+        "bot": "Music Bot",
         "channel_id": CHANNEL_ID
     }
 
 @app.get("/health")
 async def health():
-    """Health check for Railway"""
     return {"status": "healthy"}
 
-# Botni ishga tushirish va webhook sozlash
 @app.on_event("startup")
 async def on_startup():
-    """Bot ishga tushganda webhook sozlash"""
-    webhook_url = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+    logger.info("Bot ishga tushmoqda...")
     
-    if webhook_url:
-        webhook_url = f"https://{webhook_url}/webhook"
+    # Test bot
+    try:
+        bot_info = await bot.get_me()
+        logger.info(f"Bot: @{bot_info.username}")
+    except Exception as e:
+        logger.error(f"Bot xatosi: {e}")
+    
+    # Kanalni tekshirish
+    try:
+        channel = await bot.get_chat(CHANNEL_ID)
+        logger.info(f"Kanal: {channel.title}")
+    except Exception as e:
+        logger.error(f"Kanal xatosi: {e}")
+    
+    # Webhook sozlash
+    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+    if railway_domain:
+        webhook_url = f"https://{railway_domain}/webhook"
         await bot.set_webhook(webhook_url)
-        logging.info(f"Webhook sozlandi: {webhook_url}")
+        logger.info(f"Webhook sozlandi: {webhook_url}")
     else:
-        logging.warning("RAILWAY_PUBLIC_DOMAIN topilmadi")
+        logger.info("RAILWAY_PUBLIC_DOMAIN topilmadi, local rejim")
 
 @app.on_event("shutdown")
 async def on_shutdown():
-    """Bot to'xtaganda webhook o'chirish"""
     await bot.delete_webhook()
     await bot.session.close()
-    logging.info("Bot to'xtadi")
+    logger.info("Bot to'xtadi")
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
