@@ -1,187 +1,125 @@
+import asyncio
 import logging
 import os
-import asyncio
-from aiohttp import web
-from mutagen.id3 import ID3, APIC
-from mutagen.flac import FLAC
-from mutagen.mp4 import MP4
-from PIL import Image
-import io
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.utils.media_group import MediaGroupBuilder
 
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ContextTypes,
-)
+# Configuratsiya
+TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = os.getenv("CHANNEL_ID")
 
-from config import BOT_TOKEN, CHANNEL_ID, ADMIN_ID
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
+channel_info = None
 
-# To'g'ri qo'shtirnoqlar bilan logging sozlamalari
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
-logger = logging.getLogger(__name__)
+async def get_channel_data():
+    global channel_info
+    if channel_info is None:
+        channel_info = await bot.get_chat(CHANNEL_ID)
+    return channel_info
 
-# =============================================
-# UPTIME ROBOT UCHUN WEB SERVER
-# =============================================
-
-async def health_check(request):
-    return web.Response(text="OK - Bot ishlayapti!", status=200)
-
-async def start_web_server():
-    app_web = web.Application()
-    app_web.router.add_get("/", health_check)
-    app_web.router.add_get("/health", health_check)
-
-    runner = web.AppRunner(app_web)
-    await runner.setup()
-
-    # Railway PORT env o'zgaruvchisini avtomatik beradi
-    port = int(os.environ.get("PORT", 8080))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    logger.info(f"Web server port {port} da ishga tushdi")
-
-# =============================================
-# YORDAMCHI FUNKSIYALAR
-# =============================================
-
-def extract_metadata(file_path: str) -> dict:
-    metadata = {"title": None, "artist": None, "cover": None}
-    try:
-        ext = os.path.splitext(file_path)[1].lower()
-        if ext == ".mp3":
-            audio = ID3(file_path)
-            if "TIT2" in audio:
-                metadata["title"] = str(audio["TIT2"])
-            if "TPE1" in audio:
-                metadata["artist"] = str(audio["TPE1"])
-            for tag in audio.values():
-                if isinstance(tag, APIC):
-                    metadata["cover"] = tag.data
-                    break
-        elif ext == ".flac":
-            audio = FLAC(file_path)
-            metadata["title"] = audio.get("title", [None])[0]
-            metadata["artist"] = audio.get("artist", [None])[0]
-            pics = audio.pictures
-            if pics:
-                metadata["cover"] = pics[0].data
-        elif ext in (".m4a", ".mp4", ".aac"):
-            audio = MP4(file_path)
-            if audio.tags:
-                metadata["title"] = audio.tags.get("\xa9nam", [None])[0]
-                metadata["artist"] = audio.tags.get("\xa9ART", [None])[0]
-                cover_list = audio.tags.get("covr")
-                if cover_list:
-                    metadata["cover"] = bytes(cover_list[0])
-    except Exception as e:
-        logger.warning(f"Metadata ajratishda xato: {e}")
-    return metadata
-
-def build_caption(title, artist, file_name):
-    t = title or os.path.splitext(file_name)[0]
-    a = artist or "Noma'lum ijrochi"
-    return (
-        f"🎵 <b>{t}</b>\n"
-        f"🎤 <i>{a}</i>\n\n"
-        f"🎧 Tinglang va zavqlaning!"
+@dp.message(Command("start"))
+async def start_command(message: types.Message):
+    await message.answer(
+        "🎵 **Musiqa botiga xush kelibsiz!**\n\n"
+        "Botdan foydalanish uchun:\n"
+        "1. Musiqa fayli (MP3) yuboring\n"
+        "2. Rasm (rasm yoki surat) yuboring\n\n"
+        "⚠️ **MUHIM:** Musiqa va rasmni **birgalikda** (bitta xabarda) yuboring!",
+        parse_mode="Markdown"
     )
 
-def resize_cover(cover_bytes, max_size=1280):
-    img = Image.open(io.BytesIO(cover_bytes))
-    img.thumbnail((max_size, max_size))
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=90)
-    return buf.getvalue()
+@dp.message(Command("info"))
+async def info_command(message: types.Message):
+    try:
+        channel = await get_channel_data()
+        text = (f"📢 **Kanal ma'lumotlari:**\n"
+                f"📛 **Nomi:** {channel.title}\n"
+                f"🆔 **ID:** {channel.id}")
+        await message.answer(text, parse_mode="Markdown")
+    except Exception as e:
+        await message.answer(f"❌ Xatolik: {str(e)}")
 
-# =============================================
-# BOT HANDLERLARI
-# =============================================
+@dp.message(F.audio & F.photo)
+async def handle_audio_with_photo(message: types.Message):
+    try:
+        channel = await get_channel_data()
+        album_builder = MediaGroupBuilder()
+        
+        audio = message.audio
+        song_title = audio.title if audio.title else "Noma'lum qo'shiq"
+        performer = audio.performer if audio.performer else "Noma'lum ijrochi"
+        
+        caption = (
+            f"🎵 **{performer}** – {song_title}\n\n"
+            f"📢 **Kanal:** {channel.title}\n"
+            f"⏱ Davomiyligi: {audio.duration // 60}:{audio.duration % 60:02d}"
+        )
+        
+        photo = message.photo[-1]
+        album_builder.add_photo(
+            media=photo.file_id,
+            caption=caption,
+            parse_mode="Markdown"
+        )
+        
+        album_builder.add_audio(
+            media=audio.file_id,
+            performer=performer,
+            title=song_title
+        )
+        
+        await bot.send_media_group(
+            chat_id=CHANNEL_ID,
+            media=album_builder.build()
+        )
+        
+        await message.reply(
+            f"✅ **Muvaffaqiyatli yuborildi!**\n\n"
+            f"🎵 {song_title} - {performer}",
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logging.error(f"Xatolik: {e}")
+        await message.reply(f"❌ Xatolik: {str(e)}")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🎵 <b>Musiqa Bot</b>\n\n"
-        "Menga MP3, FLAC yoki M4A fayl yuboring — "
-        "men uni avtomatik ravishda kanalga joylashtirib beraman.\n\n"
-        "✅ Musiqa nomi va ijrochi rasmi bilan chiroyli formatda yuboriladi.",
-        parse_mode="HTML",
+@dp.message(F.audio)
+async def handle_audio_only(message: types.Message):
+    await message.reply(
+        "⚠️ **Faqat musiqa yubordingiz!**\n\n"
+        "Musiqa bilan birga **rasm** ham yuboring.",
+        parse_mode="Markdown"
     )
 
-async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    if user.id != ADMIN_ID:
-        await update.message.reply_text("❌ Sizda ruxsat yo'q.")
-        return
+@dp.message(F.photo)
+async def handle_photo_only(message: types.Message):
+    await message.reply(
+        "⚠️ **Faqat rasm yubordingiz!**\n\n"
+        "Rasm bilan birga **musiqa** ham yuboring.",
+        parse_mode="Markdown"
+    )
 
-    msg = update.message
-    audio = msg.audio or msg.document
-    if audio is None:
-        await msg.reply_text("⚠️ Iltimos, audio fayl yuboring.")
-        return
+@dp.message()
+async def handle_other(message: types.Message):
+    await message.reply(
+        "❓ **Noto'g'ri format!**\n\n"
+        "Faqat: Musiqa (MP3) + Rasm birgalikda\n"
+        "/start - boshlash\n"
+        "/info - kanal ma'lumoti",
+        parse_mode="Markdown"
+    )
 
-    status_msg = await msg.reply_text("⏳ Fayl yuklanmoqda...")
-    file = await context.bot.get_file(audio.file_id)
-    file_name = getattr(audio, "file_name", None) or "music.mp3"
-    file_path = f"/tmp/{audio.file_unique_id}_{file_name}"
-    await file.download_to_drive(file_path)
-
-    await status_msg.edit_text("🔍 Metadata o'qilmoqda...")
-    meta = extract_metadata(file_path)
-    caption = build_caption(meta["title"], meta["artist"], file_name)
-
-    await status_msg.edit_text("📤 Kanalga yuborilmoqda...")
-    try:
-        with open(file_path, "rb") as audio_file:
-            if meta["cover"]:
-                cover_io = io.BytesIO(resize_cover(meta["cover"]))
-                cover_io.name = "cover.jpg"
-                await context.bot.send_photo(
-                    chat_id=CHANNEL_ID, photo=cover_io,
-                    caption=caption, parse_mode="HTML",
-                )
-                audio_file.seek(0)
-                await context.bot.send_audio(
-                    chat_id=CHANNEL_ID, audio=audio_file,
-                    title=meta["title"] or os.path.splitext(file_name)[0],
-                    performer=meta["artist"] or "Noma'lum",
-                )
-            else:
-                await context.bot.send_audio(
-                    chat_id=CHANNEL_ID, audio=audio_file,
-                    caption=caption, parse_mode="HTML",
-                    title=meta["title"] or os.path.splitext(file_name)[0],
-                    performer=meta["artist"] or "Noma'lum",
-                )
-        await status_msg.edit_text("✅ Musiqa kanalga muvaffaqiyatli yuborildi!")
-    except Exception as e:
-        logger.error(f"Xato: {e}")
-        await status_msg.edit_text(f"❌ Xato: {e}")
-    finally:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-
-# =============================================
-# MAIN
-# =============================================
-
-async def run():
-    await start_web_server()
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.AUDIO | filters.Document.AUDIO, handle_audio))
-
-    logger.info("Bot ishga tushdi...")
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-
-    await asyncio.Event().wait()
+async def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    await bot.delete_webhook(drop_pending_updates=True)
+    print("🤖 Bot ishga tushdi...")
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    asyncio.run(main())
