@@ -7,16 +7,22 @@ from aiogram.utils.media_group import MediaGroupBuilder
 from aiogram.types import Update
 
 # ============================================
-# SIZNING TOKEN VA CHANNEL ID
+# Environment variables (XAVFSIZ)
 # ============================================
-BOT_TOKEN = "8799250450:AAHEZxCDTyECh840JFZ29LyGcRU5nwEB624"
-CHANNEL_ID = "-1002199433054"  # String holatda
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = os.getenv("CHANNEL_ID")
+
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable not set!")
+
+if not CHANNEL_ID:
+    raise ValueError("CHANNEL_ID environment variable not set!")
 
 # Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Botni ishga tushirish
+# Bot
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 app = FastAPI()
@@ -42,7 +48,7 @@ async def start_command(message: types.Message):
         "Botdan foydalanish:\n"
         "1. Musiqa (MP3) yuboring\n"
         "2. Rasm yuboring\n\n"
-        "⚠️ **MUHIM:** Musiqa va rasmni **BIRGALIKDA** (bitta xabarda) yuboring!\n\n"
+        "⚠️ **MUHIM:** Musiqa va rasmni BIRGALIKDA yuboring!\n\n"
         "✅ /info - kanal ma'lumoti",
         parse_mode="Markdown"
     )
@@ -54,8 +60,7 @@ async def info_command(message: types.Message):
         if channel:
             text = (f"📢 **Kanal ma'lumotlari:**\n"
                     f"📛 **Nomi:** {channel.title}\n"
-                    f"🆔 **ID:** {channel.id}\n"
-                    f"👥 **A'zolar:** {channel.members_count if hasattr(channel, 'members_count') else 'Noma'lum'}")
+                    f"🆔 **ID:** {channel.id}")
             await message.answer(text, parse_mode="Markdown")
         else:
             await message.answer("❌ Kanal topilmadi! Bot kanalda adminmi?")
@@ -76,19 +81,18 @@ async def handle_audio_with_photo(message: types.Message):
         song_title = audio.title if audio.title else "Noma'lum qo'shiq"
         performer = audio.performer if audio.performer else "Noma'lum ijrochi"
         
-        # Rasm uchun caption
-        caption = (
-            f"🎵 **{performer}** – {song_title}\n\n"
-            f"📢 **Kanal:** {channel.title}\n"
-            f"⏱ Davomiyligi: {audio.duration // 60}:{audio.duration % 60:02d}\n"
-            f"💾 Hajmi: {audio.file_size / (1024*1024):.2f} MB"
-        )
+        # Davomiylikni hisoblash
+        minutes = audio.duration // 60
+        seconds = audio.duration % 60
         
-        # Rasm qo'shish (eng sifatli)
+        # Rasm uchun caption (f-string to'g'ri yopilgan)
+        caption_text = f"🎵 {performer} – {song_title}\n\n📢 Kanal: {channel.title}\n⏱ Davomiyligi: {minutes}:{seconds:02d}"
+        
+        # Rasm qo'shish
         photo = message.photo[-1]
         album_builder.add_photo(
             media=photo.file_id,
-            caption=caption,
+            caption=caption_text,
             parse_mode="Markdown"
         )
         
@@ -106,9 +110,7 @@ async def handle_audio_with_photo(message: types.Message):
         )
         
         await message.reply(
-            f"✅ **Muvaffaqiyatli!**\n\n"
-            f"🎵 {song_title} - {performer}\n"
-            f"📢 Kanalga yuborildi!",
+            f"✅ Muvaffaqiyatli!\n\n🎵 {song_title} - {performer}\n📢 Kanalga yuborildi!",
             parse_mode="Markdown"
         )
         
@@ -118,29 +120,22 @@ async def handle_audio_with_photo(message: types.Message):
 
 @dp.message(F.audio)
 async def handle_audio_only(message: types.Message):
-    audio = message.audio
     await message.reply(
-        f"⚠️ **Faqat musiqa!**\n\n"
-        f"Musiqa: {audio.title or 'Noma'lum'} - {audio.performer or 'Noma'lum'}\n\n"
-        f"Iltimos, musiqa bilan birga **rasm** ham yuboring.",
+        "⚠️ Faqat musiqa!\n\nIltimos, musiqa bilan birga rasm ham yuboring.",
         parse_mode="Markdown"
     )
 
 @dp.message(F.photo)
 async def handle_photo_only(message: types.Message):
     await message.reply(
-        "⚠️ **Faqat rasm!**\n\n"
-        "Iltimos, rasm bilan birga **musiqa (MP3)** ham yuboring.",
+        "⚠️ Faqat rasm!\n\nIltimos, rasm bilan birga musiqa ham yuboring.",
         parse_mode="Markdown"
     )
 
 @dp.message()
 async def handle_other(message: types.Message):
     await message.reply(
-        "❓ **Noto'g'ri format!**\n\n"
-        "✅ Musiqa (MP3) + Rasm birgalikda\n"
-        "✅ /start - boshlash\n"
-        "✅ /info - kanal ma'lumoti",
+        "❓ Noto'g'ri format!\n\n✅ Musiqa + Rasm birgalikda\n✅ /start - boshlash\n✅ /info - kanal ma'lumoti",
         parse_mode="Markdown"
     )
 
@@ -192,8 +187,6 @@ async def on_startup():
         webhook_url = f"https://{railway_domain}/webhook"
         await bot.set_webhook(webhook_url)
         logger.info(f"Webhook sozlandi: {webhook_url}")
-    else:
-        logger.info("RAILWAY_PUBLIC_DOMAIN topilmadi, local rejim")
 
 @app.on_event("shutdown")
 async def on_shutdown():
